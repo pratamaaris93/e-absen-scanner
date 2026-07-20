@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Scan QR - E-Absen</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .animate-fadeIn { animation: fadeIn 0.3s ease forwards; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 0.8s linear infinite; }
+  @keyframes popIn { from { opacity:0; transform: scale(0.85); } to { opacity:1; transform: scale(1); } }
+  .pop-in { animation: popIn 0.35s ease forwards; }
+</style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 via-slate-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
+
+  <div class="w-full max-w-sm bg-white/95 backdrop-blur-md border border-white/60 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] rounded-3xl p-5 animate-fadeIn">
+
+    <div id="view-scan">
+      <div class="text-center mb-3">
+        <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-700 rounded-2xl mx-auto mb-2 flex items-center justify-center text-white shadow-lg">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="3" height="3" rx="0.5"/><rect x="18" y="18" width="3" height="3" rx="0.5"/><rect x="14" y="18" width="3" height="3" rx="0.5"/><rect x="18" y="14" width="3" height="3" rx="0.5"/></svg>
+        </div>
+        <h1 class="font-black text-lg text-slate-800">Scan QR Murid</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Arahkan kamera ke kode QR</p>
+      </div>
+
+      <div id="reader" class="w-full rounded-2xl overflow-hidden bg-slate-100 min-h-[240px] flex items-center justify-center">
+        <svg id="loading-spinner" class="spin text-blue-500" width="30" height="30" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+          <path d="M22 12a10 10 0 00-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <div id="error-box" class="hidden mt-3 bg-rose-50 border border-rose-200 text-rose-600 text-xs p-3 rounded-xl"></div>
+
+      <div class="mt-4 pt-4 border-t border-gray-100">
+        <p class="text-xs font-bold text-slate-500 mb-2">Atau input manual NIS / ID:</p>
+        <div class="flex gap-2">
+          <input id="manual-input" type="text" placeholder="Masukkan NIS..."
+                 class="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <button id="manual-submit" class="bg-blue-600 text-white px-4 rounded-xl font-bold text-sm">OK</button>
+        </div>
+      </div>
+
+      <button id="close-btn" class="w-full mt-4 py-2.5 rounded-xl font-bold text-sm text-slate-400 hover:text-slate-600">Tutup</button>
+    </div>
+
+    <div id="view-success" class="hidden text-center py-6 pop-in">
+      <div class="w-16 h-16 bg-emerald-50 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <h2 class="font-bold text-lg text-slate-800 mb-1">Berhasil Dikirim</h2>
+      <p class="text-sm text-slate-500 mb-1">Kode: <span id="success-code" class="font-bold text-slate-700"></span></p>
+      <p class="text-xs text-slate-400 mb-5">Silakan kembali ke aplikasi E-Absen.</p>
+      <button id="close-btn-2" class="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold text-sm">Tutup Halaman Ini</button>
+    </div>
+
+  </div>
+
+<script>
+  const viewScan = document.getElementById('view-scan');
+  const viewSuccess = document.getElementById('view-success');
+  const errorBox = document.getElementById('error-box');
+  const loadingSpinner = document.getElementById('loading-spinner');
+  const manualInput = document.getElementById('manual-input');
+  const successCode = document.getElementById('success-code');
+
+  let html5Qr = null;
+
+  function showError(msg) {
+    if (loadingSpinner) loadingSpinner.style.display = 'none';
+    errorBox.textContent = msg;
+    errorBox.classList.remove('hidden');
+  }
+
+  // Kirim hasil scan/kode kembali ke jendela pembuka (aplikasi E-Absen), lalu tampilkan konfirmasi.
+  function sendResult(text) {
+    try {
+      if (window.opener) {
+        window.opener.postMessage({ type: 'EABSEN_QR_RESULT', text: text }, '*');
+      }
+    } catch (e) {}
+
+    if (html5Qr) {
+      try {
+        const stopResult = html5Qr.stop();
+        if (stopResult && typeof stopResult.then === 'function') stopResult.catch(() => {});
+      } catch (e) {}
+    }
+
+    successCode.textContent = text;
+    viewScan.classList.add('hidden');
+    viewSuccess.classList.remove('hidden');
+
+    // Coba tutup otomatis (berfungsi jika halaman ini dibuka via window.open dari aplikasi)
+    setTimeout(() => { try { window.close(); } catch (e) {} }, 1600);
+  }
+
+  function isCameraSupported() {
+    try {
+      if (!window.isSecureContext) return false;
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') return false;
+      if (typeof Html5Qrcode === 'undefined') return false;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function startScanner() {
+    if (!isCameraSupported()) {
+      showError('Kamera tidak dapat diakses oleh browser pada perangkat ini. Gunakan input manual di bawah.');
+      return;
+    }
+    try {
+      html5Qr = new Html5Qrcode("reader");
+    } catch (e) {
+      showError('Gagal menyiapkan scanner: ' + (e && e.message ? e.message : e));
+      return;
+    }
+
+    const config = { fps: 10, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 };
+    const onSuccess = (decodedText) => sendResult(decodedText);
+    const startWith = (camConfig) => html5Qr.start(camConfig, config, onSuccess, () => {});
+
+    startWith({ facingMode: "environment" })
+      .then(() => { if (loadingSpinner) loadingSpinner.style.display = 'none'; })
+      .catch(() => {
+        try {
+          Html5Qrcode.getCameras().then(cameras => {
+            if (cameras && cameras.length) {
+              const backCam = cameras.find(c => /back|rear|belakang/i.test(c.label)) || cameras[cameras.length - 1];
+              startWith(backCam.id)
+                .then(() => { if (loadingSpinner) loadingSpinner.style.display = 'none'; })
+                .catch(err => showError('Gagal mengaktifkan kamera: ' + err));
+            } else {
+              showError('Kamera tidak ditemukan di perangkat ini.');
+            }
+          }).catch(() => showError('Izin kamera ditolak/tidak tersedia.'));
+        } catch (e) {
+          showError('Kamera tidak dapat diaktifkan di perangkat ini.');
+        }
+      });
+  }
+
+  document.getElementById('manual-submit').addEventListener('click', () => {
+    const val = manualInput.value.trim();
+    if (val) sendResult(val);
+  });
+  manualInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const val = manualInput.value.trim();
+      if (val) sendResult(val);
+    }
+  });
+  document.getElementById('close-btn').addEventListener('click', () => { try { window.close(); } catch(e) {} });
+  document.getElementById('close-btn-2').addEventListener('click', () => { try { window.close(); } catch(e) {} });
+
+  window.addEventListener('beforeunload', () => {
+    if (html5Qr) { try { html5Qr.stop(); } catch(e) {} }
+  });
+
+  startScanner();
+</script>
+</body>
+</html>
